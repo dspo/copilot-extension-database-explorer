@@ -1,0 +1,38 @@
+{
+  "name": "copilot-extension-database-explorer",
+  "version": "0.1.0",
+  "description": "npm package for installing the database-explorer Copilot CLI extension and running it as an MCP server",
+  "type": "module",
+  "bin": {
+    "copilot-extension-database-explorer": "./dist/cli.mjs"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build:runtime": "esbuild src/runtime.ts --bundle --format=cjs --platform=node --target=node20 --outfile=dist/runtime.cjs",
+    "build:extension": "esbuild src/extension.ts --bundle --format=esm --platform=node --target=node20 --external:@github/copilot-sdk/extension --outfile=dist/extension.mjs",
+    "build:mcp": "esbuild src/mcp.ts --bundle --format=cjs --platform=node --target=node20 --outfile=dist/mcp.cjs",
+    "build:cli": "esbuild src/cli.ts --bundle --format=esm --platform=node --target=node20 --banner:js='#!/usr/bin/env node' --outfile=dist/cli.mjs",
+    "build:assets": "node ./scripts/copy-assets.mjs",
+    "build": "npm run build:runtime && npm run build:extension && npm run build:mcp && npm run build:cli && npm run build:assets",
+    "typecheck": "tsc --project tsconfig.json --noEmit",
+    "prepack": "npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.30",
+    "@types/pg": "^8.20.0",
+    "@types/sql.js": "^1.4.11",
+    "esbuild": "^0.25.3",
+    "mysql2": "^3.15.1",
+    "pg": "^8.20.0",
+    "sql.js": "^1.14.1",
+    "typescript": "^5.8.3",
+    "yaml": "^2.8.1"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^4.3.6"
+  }
+}
