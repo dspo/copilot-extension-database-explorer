@@ -1,0 +1,104 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build package
+        run: npm run build
+
+      - name: Smoke test SQLite flow
+        run: npm run smoke:sqlite
+
+      - name: Pack npm artifact
+        id: pack
+        shell: bash
+        run: |
+          set -euo pipefail
+          package_file="$(npm pack --silent)"
+          checksum_file="${package_file}.sha256"
+          shasum -a 256 "$package_file" > "$checksum_file"
+          echo "package_file=$package_file" >> "$GITHUB_OUTPUT"
+          echo "checksum_file=$checksum_file" >> "$GITHUB_OUTPUT"
+
+      - name: Update dev tag on main
+        if: github.ref == 'refs/heads/main'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const ref = "tags/dev";
+            const sha = context.sha;
+
+            try {
+              await github.rest.git.getRef({ owner, repo, ref });
+              await github.rest.git.updateRef({ owner, repo, ref, sha, force: true });
+            } catch (error) {
+              if (error.status === 404) {
+                await github.rest.git.createRef({ owner, repo, ref: `refs/${ref}`, sha });
+              } else {
+                throw error;
+              }
+            }
+
+      - name: Determine release metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF}" = "refs/heads/main" ]; then
+            echo "tag=dev" >> "$GITHUB_OUTPUT"
+            echo "name=dev" >> "$GITHUB_OUTPUT"
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "make_latest=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            echo "name=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "make_latest=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: ${{ steps.meta.outputs.name }}
+          prerelease: ${{ steps.meta.outputs.prerelease }}
+          make_latest: ${{ steps.meta.outputs.make_latest }}
+          generate_release_notes: true
+          files: |
+            ${{ steps.pack.outputs.package_file }}
+            ${{ steps.pack.outputs.checksum_file }}

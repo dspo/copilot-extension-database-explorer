@@ -17,6 +17,8 @@
     "build:cli": "esbuild src/cli.ts --bundle --format=esm --platform=node --target=node20 --banner:js='#!/usr/bin/env node' --outfile=dist/cli.mjs",
     "build:assets": "node ./scripts/copy-assets.mjs",
     "build": "npm run build:runtime && npm run build:extension && npm run build:mcp && npm run build:cli && npm run build:assets",
+    "prepare": "npm run build",
+    "smoke:sqlite": "node ./scripts/smoke-sqlite.mjs",
     "typecheck": "tsc --project tsconfig.json --noEmit",
     "prepack": "npm run build"
   },

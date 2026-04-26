@@ -7,13 +7,15 @@ Use the npm scripts in `package.json`:
 - `npm install`
 - `npm run typecheck` — strict TypeScript check with `tsc --noEmit`
 - `npm run build` — builds all distributable artifacts into `dist/`
+- `npm run prepare` — same as `npm run build`; this is what Git-based `npx github:...` installs rely on
+- `npm run smoke:sqlite` — smoke test the built runtime and shared tool surface through a temporary SQLite database
 - `npm run build:runtime` — rebuild only the shared CommonJS runtime
 - `npm run build:extension` — rebuild only the Copilot extension entrypoint
 - `npm run build:mcp` — rebuild only the stdio MCP server bundle
 - `npm run build:cli` — rebuild only the package CLI
 - `npm run build:assets` — copy `assets/SKILL.md` and the SQLite wasm asset into `dist/`
 
-There is currently no dedicated `test` or `lint` script in this package, so there is no repo-specific single-test command to run.
+There is no dedicated lint script in this package. The closest repo-specific test entrypoint is `npm run smoke:sqlite`.
 
 ## High-level architecture
 
@@ -28,8 +30,10 @@ This package ships the same database-explorer behavior through two surfaces: a C
 - `src/mcp.ts` exposes the same shared tool definitions as a stdio MCP server. It converts the repo's custom `ToolParameterDefinition` objects into Zod schemas for `@modelcontextprotocol/sdk`.
 - `src/cli.ts` is the package entrypoint used by `npx`. `install` copies the built extension artifacts into a target repo under `.github/extensions/database-explorer/`; `mcp` dynamically loads `dist/mcp.cjs` and starts the server against a chosen working directory.
 - `scripts/copy-assets.mjs` is part of the build pipeline; it copies both `assets/SKILL.md` and `node_modules/sql.js/dist/sql-wasm.wasm` into `dist/` so the installed extension ships its prompt guidance and SQLite runtime asset alongside the code.
+- `scripts/smoke-sqlite.mjs` is the repository smoke test. It builds a temporary SQLite database, runs the compiled runtime, and exercises the focused discovery + diagnostics tools end-to-end.
+- `.github/workflows/ci.yml` validates install/build/package behavior on pushes to `main` and pull requests. `.github/workflows/release.yml` publishes a moving `dev` prerelease from `main` and versioned Releases from `v*` tags.
 
-The shipped extension is artifact-based, not source-based. `npm run build` must produce the files in `dist/` before `install`, `prepack`, or local CLI testing will work.
+The shipped extension is artifact-based, not source-based. `npm run build` must produce the files in `dist/` before `install`, `prepack`, or local CLI testing will work, and `prepare` must stay healthy because GitHub-based `npx github:...` execution depends on it.
 
 ## Key conventions
 
@@ -42,3 +46,4 @@ The shipped extension is artifact-based, not source-based. `npm run build` must 
 - Result formatting is deliberately consistent across both surfaces: driver adapters return JSON-safe shapes, and cross-driver normalization lives in `src/drivers/shared.ts`.
 - The shared tool surface now includes focused discovery tools (`find_table`, `find_column`, `list_columns`, `list_indexes`, `list_foreign_keys`), diagnostics (`test_connection`, `health_check`, `table_stats`), and planning aids (`explain_query`). When adding future capabilities, extend the adapter interface and register the new shared definition once in `src/core.ts`.
 - The installer only manages `SKILL.md`, `extension.mjs`, `runtime.cjs`, and `sql-wasm.wasm` inside `.github/extensions/database-explorer/`. `src/cli.ts` refuses to overwrite extra files in that directory unless `--force` is passed.
+- Keep CI and release workflows aligned with the repo scripts. If the validation surface changes, update both `.github/workflows/ci.yml` and `.github/workflows/release.yml` together instead of letting them drift.

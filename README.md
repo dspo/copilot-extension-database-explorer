@@ -42,6 +42,17 @@ Or install into another directory:
 npx copilot-extension-database-explorer install --target /path/to/project
 ```
 
+## Run directly from GitHub
+
+The repository is set up so `npx` can execute it straight from GitHub without committing `dist/`:
+
+```bash
+npx github:dspo/copilot-extension-database-explorer --help
+npx github:dspo/copilot-extension-database-explorer install
+```
+
+This relies on the package `prepare` script to build `dist/` during Git-based installs.
+
 The installer writes only these files into the target project:
 
 ```text
@@ -183,10 +194,16 @@ Use `database_explorer_health_check` when you also want latency and readiness de
 
 Each adapter implements the same shared contract, so adding or changing a tool in `src/core.ts` keeps the Copilot extension and MCP server in sync automatically.
 
+## CI and releases
+
+- `.github/workflows/ci.yml` runs `npm ci`, `npm run typecheck`, `npm run build`, `npm run smoke:sqlite`, and a packaged CLI check via `npm pack` + `npx`.
+- `.github/workflows/release.yml` runs the same validation on release builds, publishes a moving `dev` prerelease from `main`, and publishes versioned GitHub Releases for `v*` tags.
+
 ## Development
 
 ```bash
 npm install
 npm run build
 npm run typecheck
+npm run smoke:sqlite
 ```
