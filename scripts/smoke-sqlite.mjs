@@ -47,15 +47,16 @@ try {
         return JSON.parse(result.textResultForLlm);
     }
 
-    if (tools.length !== 17) {
-        throw new Error(`expected 17 tools, received ${tools.length}`);
+    if (tools.length !== 15) {
+        throw new Error(`expected 15 tools, received ${tools.length}`);
     }
 
-    const health = await runTool("database_explorer_health_check");
+    const healthQuick = await runTool("database_explorer_health_check", { mode: "quick" });
+    const healthFull = await runTool("database_explorer_health_check", { mode: "full" });
     const findTable = await runTool("database_explorer_find_table", { search: "us" });
     const findColumn = await runTool("database_explorer_find_column", { search: "email" });
     const listColumns = await runTool("database_explorer_list_columns", { table: "users" });
-    const showCreateTable = await runTool("database_explorer_show_create_table", { table: "users" });
+    const describeTable = await runTool("database_explorer_describe_table", { table: "users" });
     const explain = await runTool("database_explorer_explain_query", {
         sql: 'SELECT * FROM users WHERE email = "ada@example.com"',
     });
@@ -63,8 +64,11 @@ try {
     const indexes = await runTool("database_explorer_list_indexes", { table: "users" });
     const foreignKeys = await runTool("database_explorer_list_foreign_keys", { table: "users" });
 
-    if (health.usable !== true) {
-        throw new Error("health check did not report usable=true");
+    if (healthQuick.usable !== true || healthQuick.mode !== "quick") {
+        throw new Error("health_check quick mode did not report expected result");
+    }
+    if (healthFull.usable !== true || healthFull.mode !== "full" || typeof healthFull.latencyMs !== "number") {
+        throw new Error("health_check full mode did not report expected result");
     }
     if (findTable.rows.length !== 1 || findTable.rows[0].table_name !== "users") {
         throw new Error("find_table did not locate users");
@@ -75,11 +79,11 @@ try {
     if (listColumns.rows.length !== 3) {
         throw new Error("list_columns did not return the expected columns");
     }
-    if (typeof showCreateTable.createStatement !== "string" || showCreateTable.createStatement.trim() === "") {
-        throw new Error("show_create_table did not return a create statement");
+    if (typeof describeTable.createStatement !== "string" || describeTable.createStatement.trim() === "") {
+        throw new Error("describe_table did not return a create statement");
     }
-    if (!showCreateTable.foreignKeys || !Array.isArray(showCreateTable.foreignKeys.rows) || showCreateTable.foreignKeys.rows.length === 0) {
-        throw new Error("show_create_table did not return foreign keys");
+    if (!describeTable.foreignKeys || !Array.isArray(describeTable.foreignKeys.rows) || describeTable.foreignKeys.rows.length === 0) {
+        throw new Error("describe_table did not return foreign keys");
     }
     if (explain.rows.length === 0) {
         throw new Error("explain_query returned no plan rows");

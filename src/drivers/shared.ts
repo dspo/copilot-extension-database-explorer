@@ -17,7 +17,7 @@ export function validateSelectStatement(sqlText: string): string {
     }
     if (SHOW_CREATE_TABLE_PATTERN.test(trimmed)) {
         throw new Error(
-            "safety restriction: only SELECT queries are allowed; use database_explorer_show_create_table (or database_explorer_describe_table) instead",
+            "safety restriction: only SELECT queries are allowed; use database_explorer_describe_table instead",
         );
     }
     if (!SELECT_PATTERN.test(trimmed)) {

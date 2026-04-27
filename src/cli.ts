@@ -145,7 +145,7 @@ async function install(options: InstallOptions): Promise<void> {
     console.log("Next steps:");
     console.log("1. Restart Copilot CLI or run /clear so the new extension is loaded.");
     console.log("2. Pass config JSON text to database_explorer_* tools.");
-    console.log("3. Run database_explorer_test_connection to verify the selected alias can connect.");
+    console.log("3. Run database_explorer_health_check (mode quick/full) to verify connectivity.");
 }
 
 async function startMcpServer(options: McpOptions): Promise<void> {

@@ -12,7 +12,6 @@ Supported database drivers: MySQL, PostgreSQL, and SQLite.
 The extension and MCP server expose the same shared tool surface:
 
 - `database_explorer_list_databases`
-- `database_explorer_test_connection`
 - `database_explorer_health_check`
 - `database_explorer_list_schemas`
 - `database_explorer_list_tables`
@@ -20,7 +19,6 @@ The extension and MCP server expose the same shared tool surface:
 - `database_explorer_find_column`
 - `database_explorer_list_columns`
 - `database_explorer_describe_table`
-- `database_explorer_show_create_table`
 - `database_explorer_sample_rows`
 - `database_explorer_query`
 - `database_explorer_explain_query`
@@ -199,9 +197,10 @@ Example `config` JSON (array form):
 
 `${ENV_VAR}` placeholders are expanded before JSON parsing.
 
-After the config is in place, use `database_explorer_test_connection` first to confirm the selected alias can connect and execute a simple query.
-Use `database_explorer_health_check` when you also want latency and readiness details.
-Use `database_explorer_show_create_table` when you need DDL plus foreign keys in one call.
+After the config is in place, use `database_explorer_health_check` first to confirm connectivity.
+Use `mode: "quick"` for fast reachability/queryability checks, and `mode: "full"` when you also want latency and current database/schema details.
+Use `database_explorer_describe_table` when you need table columns, DDL, indexes, and foreign keys in one call.
+Prefer these focused tools over `database_explorer_query` for connection checks and DDL inspection.
 
 ## Architecture
 

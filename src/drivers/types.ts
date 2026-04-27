@@ -117,7 +117,8 @@ export interface ConnectionTestResult {
 }
 
 export interface HealthCheckResult extends ConnectionTestResult {
-    latencyMs: number;
+    mode: "quick" | "full";
+    latencyMs?: number;
     currentDatabase?: string;
     currentSchema?: string;
 }

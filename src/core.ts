@@ -7,7 +7,6 @@ import type {
     CommonToolArgs,
     Config,
     ConnectionProbe,
-    ConnectionTestResult,
     DatabaseDriver,
     DatabaseDriverAdapter,
     DatabaseSummary,
@@ -65,8 +64,9 @@ export function buildDatabaseExplorerAdditionalContext(skillText: string): strin
         "When the request involves MySQL, PostgreSQL, SQLite, schema inspection, tables, columns, indexes, foreign keys, sample data, connection checks, health checks, explain plans, or read-only SQL, prefer the database_explorer_* tools available in this session.",
         "Each database_explorer_* tool accepts config as JSON text. Pass either one profile object or a profile array with name fields.",
         "JSON config may use ${ENV_VAR} placeholders; environment values are expanded before parsing.",
-        "Start by listing configured database aliases, then use connection-test or health-check before deeper schema exploration when needed.",
-        "Use the focused tools for tables, columns, indexes, foreign keys, explain, and search before falling back to general query execution.",
+        "Start by listing configured database aliases, then run database_explorer_health_check first (mode=quick for fast connectivity checks; mode=full for latency/current-db details).",
+        "For table DDL/shape, use database_explorer_describe_table instead of hand-writing SHOW CREATE TABLE in database_explorer_query.",
+        "Use focused tools for tables, columns, indexes, foreign keys, explain, and search before falling back to general query execution.",
         "Safety constraints: read-only queries only, small default result sets, and sensitive values provided via environment variables.",
         "",
         "Bundled guidance:",
@@ -94,18 +94,15 @@ export function createDatabaseExplorerDefinitions(options: DatabaseExplorerToolF
             },
         ),
         createToolDefinition(
-            "database_explorer_test_connection",
-            "Test whether a configured database alias is reachable and can execute a simple query",
-            sharedConfigParameters([]),
-            readCommonToolArgs,
-            withAdapter(async (adapter, profile, alias, args) => toConnectionTestResult(alias, profile.driver, await adapter.testConnection(profile, args))),
-        ),
-        createToolDefinition(
             "database_explorer_health_check",
-            "Run a deeper connectivity and readiness check for a configured database alias",
-            sharedConfigParameters([]),
-            readCommonToolArgs,
-            withAdapter(async (adapter, profile, alias, args) => toHealthCheckResult(alias, profile.driver, await adapter.healthCheck(profile, args))),
+            "Check connectivity first. mode=quick validates reachability/queryability; mode=full also returns latency and current database/schema.",
+            healthCheckParameters(),
+            readHealthCheckArgs,
+            withAdapter(async (adapter, profile, alias, args) =>
+                args.mode === "full"
+                    ? toHealthCheckResult(alias, profile.driver, await adapter.healthCheck(profile, args), "full")
+                    : toHealthCheckResult(alias, profile.driver, await adapter.testConnection(profile, args), "quick"),
+            ),
         ),
         createToolDefinition(
             "database_explorer_list_schemas",
@@ -144,22 +141,14 @@ export function createDatabaseExplorerDefinitions(options: DatabaseExplorerToolF
         ),
         createToolDefinition(
             "database_explorer_describe_table",
-            "Describe one table including columns, create statement, and indexes",
+            "Describe one table including columns, CREATE TABLE statement, indexes, and foreign keys",
             tableToolParameters("Table name to describe"),
-            readTableToolArgs,
-            withAdapter(async (adapter, profile, alias, args) => adapter.describeTable(profile, args)),
-        ),
-        createToolDefinition(
-            "database_explorer_show_create_table",
-            "Return a CREATE TABLE statement plus foreign keys for one table",
-            tableToolParameters("Table name to inspect"),
             readTableToolArgs,
             withAdapter(async (adapter, profile, alias, args) => {
                 const description = await adapter.describeTable(profile, args);
                 const foreignKeys = await adapter.listForeignKeys(profile, args);
                 return {
-                    table: description.table,
-                    createStatement: description.createStatement,
+                    ...description,
                     foreignKeys,
                 };
             }),
@@ -318,6 +307,21 @@ function searchToolParameters(searchDescription: string): ToolParameterDefinitio
             },
         },
         required: ["search"],
+        additionalProperties: false,
+    };
+}
+
+function healthCheckParameters(): ToolParameterDefinition {
+    return {
+        type: "object",
+        properties: {
+            ...sharedParameterProperties(),
+            mode: {
+                type: "string",
+                description: "Health check depth: quick (default) for connectivity/queryability, or full for latency/current database/schema details.",
+            },
+        },
+        required: [],
         additionalProperties: false,
     };
 }
@@ -565,26 +569,16 @@ function resolveProfileSelection(config: Config, alias: string | undefined): { a
     };
 }
 
-function toConnectionTestResult(alias: string, driver: DatabaseDriver, probe: ConnectionProbe): ConnectionTestResult {
+function toHealthCheckResult(alias: string, driver: DatabaseDriver, probe: ConnectionProbe, mode: "quick" | "full"): HealthCheckResult {
     return {
         alias,
         driver,
+        mode,
         usable: true,
         target: probe.target,
         version: probe.version,
         details: probe.details,
-    };
-}
-
-function toHealthCheckResult(alias: string, driver: DatabaseDriver, probe: HealthProbe): HealthCheckResult {
-    return {
-        alias,
-        driver,
-        usable: true,
-        target: probe.target,
-        version: probe.version,
-        details: probe.details,
-        latencyMs: probe.latencyMs,
+        latencyMs: mode === "full" ? (probe as HealthProbe).latencyMs : undefined,
         currentDatabase: probe.currentDatabase,
         currentSchema: probe.currentSchema,
     };
@@ -631,6 +625,18 @@ function readSearchArgs(value: unknown): SearchArgs {
         ...readCommonToolArgs(object),
         search: readRequiredString(object, "search"),
         limit: readOptionalInteger(object, "limit") || undefined,
+    };
+}
+
+function readHealthCheckArgs(value: unknown): CommonToolArgs & { mode: "quick" | "full" } {
+    const object = readToolArgs(value);
+    const mode = firstNonEmpty(readOptionalString(object, "mode"), "quick").toLowerCase();
+    if (mode !== "quick" && mode !== "full") {
+        throw new Error("mode must be either quick or full");
+    }
+    return {
+        ...readCommonToolArgs(object),
+        mode,
     };
 }
 
