@@ -42,7 +42,7 @@ export interface Config {
 }
 
 export interface CommonToolArgs {
-    configPath?: string;
+    config?: string;
     db?: string;
     database?: string;
     schema?: string;

@@ -7,42 +7,54 @@ When a task involves MySQL, PostgreSQL, or SQLite exploration, schema discovery,
 ## Execution rules
 
 1. Prefer the `database_explorer_*` tools registered by this extension.
-2. The default database config path is `./.github/database-explorer/database-config.yaml`.
-3. If the project stores config elsewhere, either pass `configPath` explicitly or call `database_explorer_set_default_config_path` once per session.
+2. Provide `config` as JSON text in tool arguments (single profile object or profile array).
+3. The MCP server may be started with a default `--config '<json text>'`; tool-level `config` overrides that default.
 4. Do not build or call external Go binaries for database exploration.
 
-## YAML config format (required)
+## JSON config format (required)
 
-`databases` must be an **object keyed by alias** (not a YAML list):
+Single profile object:
 
-```yaml
-databases:
-  mysql_app:
-    driver: mysql
-    host: 127.0.0.1
-    port: 3306
-    username: ${MYSQL_USER}
-    password: ${MYSQL_PASSWORD}
-    database: app_db
-
-  postgres_app:
-    driver: postgres
-    host: 127.0.0.1
-    port: 5432
-    username: ${PGUSER}
-    password: ${PGPASSWORD}
-    database: app_db
-    schema: public
-
-  sqlite_app:
-    driver: sqlite
-    path: ./data/app.sqlite
-    namespace: main
+```json
+{
+  "name": "postgres_app",
+  "driver": "postgres",
+  "host": "127.0.0.1",
+  "port": 5432,
+  "username": "${PGUSER}",
+  "password": "${PGPASSWORD}",
+  "database": "app_db",
+  "schema": "public"
+}
 ```
+
+Profile array:
+
+```json
+[
+  {
+    "name": "mysql_app",
+    "driver": "mysql",
+    "host": "127.0.0.1",
+    "port": 3306,
+    "username": "${MYSQL_USER}",
+    "password": "${MYSQL_PASSWORD}",
+    "database": "app_db"
+  },
+  {
+    "name": "sqlite_app",
+    "driver": "sqlite",
+    "path": "./data/app.sqlite",
+    "namespace": "main"
+  }
+]
+```
+
+`${ENV_VAR}` placeholders are expanded before parsing.
 
 ## Workflow
 
-1. Resolve the database config file path first.
+1. Resolve/generate the JSON config text first.
 2. Start by listing configured database aliases.
 3. Use `database_explorer_test_connection` before deeper exploration when you need to confirm connectivity and queryability.
 4. Use `database_explorer_health_check` when you need readiness details such as latency and current database/schema.

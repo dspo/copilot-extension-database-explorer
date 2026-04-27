@@ -27,11 +27,11 @@ try {
     await writeFile(dbPath, Buffer.from(db.export()));
     db.close();
 
-    const configPath = join(tempDir, "database-config.yaml");
-    await writeFile(
-        configPath,
-        `databases:\n  local:\n    driver: sqlite\n    path: ${JSON.stringify(dbPath)}\n`,
-    );
+    const config = JSON.stringify({
+        name: "local",
+        driver: "sqlite",
+        path: dbPath,
+    });
 
     const tools = runtime.createDatabaseExplorerTools({ getCwd: () => tempDir });
 
@@ -40,30 +40,17 @@ try {
         if (!tool) {
             throw new Error(`missing tool ${name}`);
         }
-        const result = await tool.handler({ ...args, db: "local" });
+        const result = await tool.handler({ ...args, config, db: "local" });
         if (result.resultType !== "success") {
             throw new Error(`${name} failed: ${result.textResultForLlm}`);
         }
         return JSON.parse(result.textResultForLlm);
     }
 
-    async function runToolWithConfig(name, args = {}) {
-        const tool = tools.find((entry) => entry.name === name);
-        if (!tool) {
-            throw new Error(`missing tool ${name}`);
-        }
-        const result = await tool.handler({ ...args, configPath, db: "local" });
-        if (result.resultType !== "success") {
-            throw new Error(`${name} failed: ${result.textResultForLlm}`);
-        }
-        return JSON.parse(result.textResultForLlm);
+    if (tools.length !== 17) {
+        throw new Error(`expected 17 tools, received ${tools.length}`);
     }
 
-    if (tools.length !== 18) {
-        throw new Error(`expected 18 tools, received ${tools.length}`);
-    }
-
-    await runToolWithConfig("database_explorer_set_default_config_path", { configPath });
     const health = await runTool("database_explorer_health_check");
     const findTable = await runTool("database_explorer_find_table", { search: "us" });
     const findColumn = await runTool("database_explorer_find_column", { search: "email" });

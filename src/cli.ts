@@ -17,7 +17,7 @@ interface InstallOptions {
 
 interface McpOptions {
     cwd: string;
-    defaultConfigPath?: string;
+    defaultConfig?: string;
 }
 
 async function main(): Promise<void> {
@@ -82,7 +82,7 @@ function parseInstallOptions(argv: string[]): InstallOptions {
 
 function parseMcpOptions(argv: string[]): McpOptions {
     let cwd = process.cwd();
-    let defaultConfigPath: string | undefined;
+    let defaultConfig: string | undefined;
 
     for (let index = 0; index < argv.length; index += 1) {
         const argument = argv[index];
@@ -99,9 +99,9 @@ function parseMcpOptions(argv: string[]): McpOptions {
             case "--config": {
                 const next = argv[index + 1];
                 if (!next) {
-                    throw new Error("--config requires a path");
+                    throw new Error("--config requires JSON text");
                 }
-                defaultConfigPath = next;
+                defaultConfig = next;
                 index += 1;
                 break;
             }
@@ -110,7 +110,7 @@ function parseMcpOptions(argv: string[]): McpOptions {
         }
     }
 
-    return { cwd, defaultConfigPath };
+    return { cwd, defaultConfig };
 }
 
 async function install(options: InstallOptions): Promise<void> {
@@ -143,9 +143,9 @@ async function install(options: InstallOptions): Promise<void> {
 
     console.log(`Installed database-explorer extension into ${extensionDir}`);
     console.log("Next steps:");
-    console.log("1. Add database config at .github/database-explorer/database-config.yaml in each target project.");
-    console.log("2. Restart Copilot CLI or run /clear so the new extension is loaded.");
-    console.log("3. Run database_explorer_test_connection to verify the configured alias can connect.");
+    console.log("1. Restart Copilot CLI or run /clear so the new extension is loaded.");
+    console.log("2. Pass config JSON text to database_explorer_* tools.");
+    console.log("3. Run database_explorer_test_connection to verify the selected alias can connect.");
 }
 
 async function startMcpServer(options: McpOptions): Promise<void> {
@@ -208,7 +208,7 @@ function resolveUserExtensionsDir(): string {
 function printHelp(): void {
     console.log("Usage:");
     console.log("  npx copilot-extension-database-explorer install [--target /path/to/project | --user|--global] [--force]");
-    console.log("  npx copilot-extension-database-explorer mcp [--cwd /path/to/project] [--config /path/to/database-config.yaml]");
+    console.log("  npx copilot-extension-database-explorer mcp [--cwd /path/to/project] [--config '<json text>']");
 }
 
 await main().catch((error) => {

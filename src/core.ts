@@ -1,7 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { isAbsolute, parse, resolve } from "node:path";
-
-import YAML from "yaml";
+import { isAbsolute, resolve } from "node:path";
 
 import { getDriverAdapter } from "./drivers";
 import { firstNonEmpty, prepareExplainQuery, prepareReadOnlyQuery, stringOrEmpty } from "./drivers/shared";
@@ -27,7 +25,6 @@ import type {
     TabularData,
 } from "./drivers/types";
 
-const DEFAULT_CONFIG_RELATIVE_PATH = ".github/database-explorer/database-config.yaml";
 const KEYWORD_PATTERN =
     /\b(mysql|postgres|postgresql|sqlite|database|schema|table structure|table schema|sample rows?|read-only sql|select query|sql optimize|sql optimization|describe table|show create table|database connection|test connection|health check|foreign key|index|column|explain query)\b/i;
 const PLACEHOLDER_PATTERN = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g;
@@ -44,7 +41,7 @@ export interface ToolParameterDefinition {
 
 export interface DatabaseExplorerToolFactoryOptions {
     getCwd: () => string;
-    defaultConfigPath?: string;
+    defaultConfig?: string;
 }
 
 export interface DatabaseExplorerToolDefinition {
@@ -66,7 +63,8 @@ export function buildDatabaseExplorerAdditionalContext(skillText: string): strin
     return [
         "database-explorer extension loaded.",
         "When the request involves MySQL, PostgreSQL, SQLite, schema inspection, tables, columns, indexes, foreign keys, sample data, connection checks, health checks, explain plans, or read-only SQL, prefer the database_explorer_* tools available in this session.",
-        "The default database config path is .github/database-explorer/database-config.yaml; pass configPath when a project stores config elsewhere.",
+        "Each database_explorer_* tool accepts config as JSON text. Pass either one profile object or a profile array with name fields.",
+        "JSON config may use ${ENV_VAR} placeholders; environment values are expanded before parsing.",
         "Start by listing configured database aliases, then use connection-test or health-check before deeper schema exploration when needed.",
         "Use the focused tools for tables, columns, indexes, foreign keys, explain, and search before falling back to general query execution.",
         "Safety constraints: read-only queries only, small default result sets, and sensitive values provided via environment variables.",
@@ -77,54 +75,21 @@ export function buildDatabaseExplorerAdditionalContext(skillText: string): strin
 }
 
 export function createDatabaseExplorerDefinitions(options: DatabaseExplorerToolFactoryOptions): DatabaseExplorerToolDefinition[] {
-    const { getCwd, defaultConfigPath } = options;
-    const sessionDefaultConfigPathByCwd = new Map<string, string>();
-    const resolveSessionDefaultConfigPath = (cwd: string): string | undefined => sessionDefaultConfigPathByCwd.get(cwd);
+    const { getCwd, defaultConfig } = options;
     const withAdapter = <TArgs, TResult>(run: (adapter: DatabaseDriverAdapter, profile: Profile, alias: string, args: TArgs) => Promise<TResult>) =>
         async (args: TArgs): Promise<TResult> => {
-            const selected = await loadSelectedDriverProfile(
-                args as CommonToolArgs,
-                getCwd,
-                defaultConfigPath,
-                resolveSessionDefaultConfigPath,
-            );
+            const selected = loadSelectedDriverProfile(args as CommonToolArgs, getCwd, defaultConfig);
             return run(selected.adapter, selected.profile, selected.alias, args);
         };
 
     return [
         createToolDefinition(
-            "database_explorer_set_default_config_path",
-            "Set a session-level default config path so subsequent database_explorer_* calls can omit configPath",
-            {
-                type: "object",
-                properties: {
-                    configPath: {
-                        type: "string",
-                        description: "Absolute or project-relative path to the database config YAML file",
-                    },
-                },
-                required: ["configPath"],
-                additionalProperties: false,
-            },
-            readSetDefaultConfigArgs,
-            async (args) => {
-                const cwd = getCwd();
-                const resolved = await resolveConfigPath(args.configPath, cwd, undefined, undefined);
-                await loadConfig(resolved);
-                sessionDefaultConfigPathByCwd.set(cwd, resolved);
-                return {
-                    cwd,
-                    defaultConfigPath: resolved,
-                };
-            },
-        ),
-        createToolDefinition(
             "database_explorer_list_databases",
-            "List configured database aliases from the database-explorer config",
+            "List database aliases from config JSON",
             sharedConfigParameters([]),
             readCommonToolArgs,
             async (args) => {
-                const config = await loadConfigFromArgs(args, getCwd, defaultConfigPath);
+                const config = loadConfigFromArgs(args, getCwd, defaultConfig);
                 return listAliases(config).map((alias) => getDriverAdapter(config.databases[alias].driver).summarize(alias, config.databases[alias]));
             },
         ),
@@ -276,8 +241,8 @@ export function formatDatabaseExplorerResult(value: unknown): string {
     return JSON.stringify(value, null, 2);
 }
 
-export async function loadConfigForTests(configPath: string): Promise<Config> {
-    return loadConfig(configPath);
+export async function loadConfigForTests(configText: string, cwd: string): Promise<Config> {
+    return parseConfigText(configText, cwd);
 }
 
 function createToolDefinition<TArgs>(
@@ -359,14 +324,14 @@ function searchToolParameters(searchDescription: string): ToolParameterDefinitio
 
 function sharedParameterProperties(): Record<string, ToolParameterDefinition> {
     return {
-        configPath: {
+        config: {
             type: "string",
             description:
-                "Optional absolute or project-relative path to the database config YAML file. Defaults to .github/database-explorer/database-config.yaml when present.",
+                "JSON text describing either one database profile object or an array of profile objects. Supports ${ENV_VAR} placeholders.",
         },
         db: {
             type: "string",
-            description: "Configured database alias from the YAML file",
+            description: "Database alias to select from config JSON entries",
         },
         database: {
             type: "string",
@@ -379,13 +344,12 @@ function sharedParameterProperties(): Record<string, ToolParameterDefinition> {
     };
 }
 
-async function loadSelectedDriverProfile(
+function loadSelectedDriverProfile(
     args: CommonToolArgs,
     getCwd: () => string,
-    defaultConfigPath?: string,
-    getSessionDefaultConfigPath?: (cwd: string) => string | undefined,
-): Promise<{ alias: string; profile: Profile; adapter: DatabaseDriverAdapter }> {
-    const config = await loadConfigFromArgs(args, getCwd, defaultConfigPath, getSessionDefaultConfigPath);
+    defaultConfig?: string,
+): { alias: string; profile: Profile; adapter: DatabaseDriverAdapter } {
+    const config = loadConfigFromArgs(args, getCwd, defaultConfig);
     const selection = resolveProfileSelection(config, args.db);
     return {
         ...selection,
@@ -393,108 +357,66 @@ async function loadSelectedDriverProfile(
     };
 }
 
-async function loadConfigFromArgs(
+function loadConfigFromArgs(
     args: CommonToolArgs,
     getCwd: () => string,
-    defaultConfigPath?: string,
-    getSessionDefaultConfigPath?: (cwd: string) => string | undefined,
-): Promise<Config> {
+    defaultConfig?: string,
+): Config {
     const cwd = getCwd();
-    const configPath = await resolveConfigPath(args.configPath, cwd, getSessionDefaultConfigPath?.(cwd), defaultConfigPath);
-    return loadConfig(configPath);
+    const configText = firstNonEmpty(args.config, defaultConfig);
+    if (configText === "") {
+        throw new Error("missing config JSON; pass config as a JSON string or start MCP with --config '<json>'");
+    }
+    return parseConfigText(configText, cwd);
 }
 
-async function resolveConfigPath(
-    inputPath: string | undefined,
-    cwd: string,
-    sessionDefaultConfigPath?: string,
-    defaultConfigPath?: string,
-): Promise<string> {
-    if (typeof inputPath === "string" && inputPath.trim() !== "") {
-        const trimmedPath = inputPath.trim();
-        return isAbsolute(trimmedPath) ? trimmedPath : resolve(cwd, trimmedPath);
-    }
-
-    if (typeof sessionDefaultConfigPath === "string" && sessionDefaultConfigPath.trim() !== "") {
-        const trimmedPath = sessionDefaultConfigPath.trim();
-        return isAbsolute(trimmedPath) ? trimmedPath : resolve(cwd, trimmedPath);
-    }
-
-    if (typeof defaultConfigPath === "string" && defaultConfigPath.trim() !== "") {
-        const trimmedPath = defaultConfigPath.trim();
-        return isAbsolute(trimmedPath) ? trimmedPath : resolve(cwd, trimmedPath);
-    }
-
-    const discovered = await findConfigPath(cwd);
-    if (discovered) {
-        return discovered;
-    }
-
-    throw new Error(
-        "unable to locate database config automatically; pass configPath explicitly or create .github/database-explorer/database-config.yaml",
-    );
-}
-
-async function findConfigPath(startDir: string): Promise<string> {
-    let currentDir = startDir || process.cwd();
-    const { root } = parse(currentDir);
-
-    while (true) {
-        const candidate = resolve(currentDir, DEFAULT_CONFIG_RELATIVE_PATH);
-        try {
-            await readFile(candidate);
-            return candidate;
-        } catch (error) {
-            if (!isErrnoException(error) || error.code !== "ENOENT") {
-                throw error;
-            }
-            if (currentDir === root) {
-                return "";
-            }
-            currentDir = parse(currentDir).dir;
-        }
-    }
-}
-
-async function loadConfig(configPath: string): Promise<Config> {
-    const raw = await readFile(configPath, "utf8");
-    const expanded = expandPlaceholders(raw);
-    const parsed = parseYamlRoot(YAML.parse(expanded), parse(configPath).dir);
-    if (Object.keys(parsed.databases).length === 0) {
-        throw new Error(
-            `config ${configPath} must define at least one database under databases (object form: databases: { alias: { ... } })`,
-        );
-    }
-    return parsed;
-}
-
-function parseYamlRoot(value: unknown, configDirectory: string): Config {
-    if (!isRecord(value)) {
-        throw new Error("config root must be an object");
-    }
-
-    const databasesValue = value.databases;
-    if (Array.isArray(databasesValue)) {
-        throw new Error(
-            "config.databases must be an object keyed by alias, not a YAML list. Example:\n" +
-                "databases:\n" +
-                "  main:\n" +
-                "    driver: mysql\n" +
-                "    host: 127.0.0.1\n" +
-                "    username: ${MYSQL_USER}\n" +
-                "    password: ${MYSQL_PASSWORD}",
-        );
-    }
-    if (!isRecord(databasesValue)) {
-        throw new Error("config must define databases as an object keyed by alias");
-    }
-
+function parseConfigText(configText: string, cwd: string): Config {
+    const expanded = expandPlaceholders(configText);
+    const parsed = parseJson(expanded);
     const databases: Record<string, Profile> = {};
-    for (const [alias, profileValue] of Object.entries(databasesValue)) {
-        databases[alias] = normalizeProfile(alias, profileValue, configDirectory);
+
+    if (Array.isArray(parsed)) {
+        for (const entry of parsed) {
+            const { alias, profile } = normalizeInputProfile(entry, cwd, true);
+            if (databases[alias]) {
+                throw new Error(`duplicate database name ${JSON.stringify(alias)} in config array`);
+            }
+            databases[alias] = profile;
+        }
+    } else {
+        const { alias, profile } = normalizeInputProfile(parsed, cwd, false);
+        databases[alias] = profile;
+    }
+
+    if (Object.keys(databases).length === 0) {
+        throw new Error("config JSON must include at least one database profile");
     }
 
     return { databases };
+}
+
+function parseJson(input: string): unknown {
+    try {
+        return JSON.parse(input);
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`config must be valid JSON: ${message}`);
+    }
+}
+
+function normalizeInputProfile(value: unknown, cwd: string, requireName: boolean): { alias: string; profile: Profile } {
+    if (!isRecord(value)) {
+        throw new Error("each config profile must be a JSON object");
+    }
+    const name = readOptionalString(value, "name");
+    if (requireName && name === "") {
+        throw new Error("each profile in config array must include a non-empty name");
+    }
+    const alias = firstNonEmpty(name, "default");
+    return {
+        alias,
+        profile: normalizeProfile(alias, value, cwd),
+    };
 }
 
 function normalizeProfile(alias: string, profileValue: unknown, configDirectory: string): Profile {
@@ -671,7 +593,7 @@ function toHealthCheckResult(alias: string, driver: DatabaseDriver, probe: Healt
 function readCommonToolArgs(value: unknown): CommonToolArgs {
     const object = readToolArgs(value);
     return {
-        configPath: readOptionalString(object, "configPath") || undefined,
+        config: readOptionalString(object, "config") || undefined,
         db: readOptionalString(object, "db") || undefined,
         database: readOptionalString(object, "database") || undefined,
         schema: readOptionalString(object, "schema") || undefined,
@@ -709,13 +631,6 @@ function readSearchArgs(value: unknown): SearchArgs {
         ...readCommonToolArgs(object),
         search: readRequiredString(object, "search"),
         limit: readOptionalInteger(object, "limit") || undefined,
-    };
-}
-
-function readSetDefaultConfigArgs(value: unknown): { configPath: string } {
-    const object = readToolArgs(value);
-    return {
-        configPath: readRequiredString(object, "configPath"),
     };
 }
 
@@ -762,10 +677,6 @@ function readOptionalBoolean(source: Record<string, unknown>, key: string): bool
         }
     }
     return false;
-}
-
-function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
-    return typeof error === "object" && error !== null && "code" in error;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

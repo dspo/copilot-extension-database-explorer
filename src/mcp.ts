@@ -13,7 +13,7 @@ const SERVER_VERSION = "0.1.0";
 
 export interface DatabaseExplorerMcpServerOptions {
     cwd: string;
-    defaultConfigPath?: string;
+    defaultConfig?: string;
 }
 
 export async function startMcpServer(options: DatabaseExplorerMcpServerOptions): Promise<void> {
@@ -29,7 +29,7 @@ export async function startMcpServer(options: DatabaseExplorerMcpServerOptions):
         },
     );
 
-    for (const tool of createDatabaseExplorerDefinitions({ getCwd: () => options.cwd, defaultConfigPath: options.defaultConfigPath })) {
+    for (const tool of createDatabaseExplorerDefinitions({ getCwd: () => options.cwd, defaultConfig: options.defaultConfig })) {
         server.registerTool(
             tool.name,
             {

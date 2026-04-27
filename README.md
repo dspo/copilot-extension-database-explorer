@@ -28,7 +28,6 @@ The extension and MCP server expose the same shared tool surface:
 - `database_explorer_list_indexes`
 - `database_explorer_list_foreign_keys`
 - `database_explorer_export_schema`
-- `database_explorer_set_default_config_path`
 
 ## Install into a project
 
@@ -82,12 +81,12 @@ Start the stdio MCP server from a project root:
 npx -y copilot-extension-database-explorer mcp --cwd /path/to/project
 ```
 
-If you want the server to default to a nonstandard config path, pass `--config`:
+If you want the server to use default config JSON for all tool calls, pass `--config`:
 
 ```bash
 npx -y copilot-extension-database-explorer mcp \
   --cwd /path/to/project \
-  --config ./config/database-explorer.yaml
+  --config '[{"name":"postgres_app","driver":"postgres","host":"127.0.0.1","port":5432,"username":"${PGUSER}","password":"${PGPASSWORD}","database":"app_db","schema":"public"}]'
 ```
 
 ### Generic MCP JSON
@@ -149,17 +148,12 @@ npx -y copilot-extension-database-explorer mcp \
 
 ## Configuration
 
-By default, both the installed Copilot extension and the MCP server look for database config at:
+Both the installed Copilot extension and the MCP server use `config` JSON text (no config-file path input on tools).
 
-```text
-.github/database-explorer/database-config.yaml
-```
+The `config` field accepts either:
 
-If a project uses another location, you can:
-
-1. pass `--config` when starting the MCP server
-2. call `database_explorer_set_default_config_path` once per session
-3. pass `configPath` explicitly to the tools
+1. one profile object
+2. an array of profile objects (each with `name`)
 
 Supported `driver` values:
 
@@ -167,33 +161,43 @@ Supported `driver` values:
 - `postgres`, `postgresql`, or `pg`
 - `sqlite` or `sqlite3`
 
-Example config:
+Example `config` JSON (single profile object):
 
-```yaml
-databases:
-  mysql_app:
-    driver: mysql
-    host: 127.0.0.1
-    port: 3306
-    username: ${MYSQL_USER}
-    password: ${MYSQL_PASSWORD}
-    database: app_db
-
-  postgres_app:
-    driver: postgres
-    host: 127.0.0.1
-    port: 5432
-    username: ${PGUSER}
-    password: ${PGPASSWORD}
-    database: app_db
-    schema: public
-
-  sqlite_app:
-    driver: sqlite
-    path: ./data/app.sqlite
+```json
+{
+  "name": "postgres_app",
+  "driver": "postgres",
+  "host": "127.0.0.1",
+  "port": 5432,
+  "username": "${PGUSER}",
+  "password": "${PGPASSWORD}",
+  "database": "app_db",
+  "schema": "public"
+}
 ```
 
-`databases` must be a map keyed by alias (object form above), not a YAML list.
+Example `config` JSON (array form):
+
+```json
+[
+  {
+    "name": "mysql_app",
+    "driver": "mysql",
+    "host": "127.0.0.1",
+    "port": 3306,
+    "username": "${MYSQL_USER}",
+    "password": "${MYSQL_PASSWORD}",
+    "database": "app_db"
+  },
+  {
+    "name": "sqlite_app",
+    "driver": "sqlite",
+    "path": "./data/app.sqlite"
+  }
+]
+```
+
+`${ENV_VAR}` placeholders are expanded before JSON parsing.
 
 After the config is in place, use `database_explorer_test_connection` first to confirm the selected alias can connect and execute a simple query.
 Use `database_explorer_health_check` when you also want latency and readiness details.
