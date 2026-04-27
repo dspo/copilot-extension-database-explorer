@@ -29,10 +29,10 @@ import type {
 
 const DEFAULT_CONFIG_RELATIVE_PATH = ".github/database-explorer/database-config.yaml";
 const KEYWORD_PATTERN =
-    /\b(mysql|postgres|postgresql|sqlite|database|schema|table structure|table schema|sample rows?|read-only sql|select query|sql optimize|sql optimization|describe table|database connection|test connection|health check|foreign key|index|column|explain query)\b/i;
+    /\b(mysql|postgres|postgresql|sqlite|database|schema|table structure|table schema|sample rows?|read-only sql|select query|sql optimize|sql optimization|describe table|show create table|database connection|test connection|health check|foreign key|index|column|explain query)\b/i;
 const PLACEHOLDER_PATTERN = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g;
 const SESSION_START_CONTEXT =
-    "database-explorer extension loaded. For MySQL, PostgreSQL, or SQLite exploration tasks, use .github/extensions/database-explorer/SKILL.md as the primary guide and prefer the database_explorer_* tools over external binaries.";
+    "database-explorer extension loaded. For MySQL, PostgreSQL, or SQLite exploration tasks, use the bundled database-explorer SKILL guidance in this session and prefer the database_explorer_* tools over external binaries.";
 
 export interface ToolParameterDefinition {
     type: "string" | "integer" | "object";
@@ -78,13 +78,46 @@ export function buildDatabaseExplorerAdditionalContext(skillText: string): strin
 
 export function createDatabaseExplorerDefinitions(options: DatabaseExplorerToolFactoryOptions): DatabaseExplorerToolDefinition[] {
     const { getCwd, defaultConfigPath } = options;
+    const sessionDefaultConfigPathByCwd = new Map<string, string>();
+    const resolveSessionDefaultConfigPath = (cwd: string): string | undefined => sessionDefaultConfigPathByCwd.get(cwd);
     const withAdapter = <TArgs, TResult>(run: (adapter: DatabaseDriverAdapter, profile: Profile, alias: string, args: TArgs) => Promise<TResult>) =>
         async (args: TArgs): Promise<TResult> => {
-            const selected = await loadSelectedDriverProfile(args as CommonToolArgs, getCwd, defaultConfigPath);
+            const selected = await loadSelectedDriverProfile(
+                args as CommonToolArgs,
+                getCwd,
+                defaultConfigPath,
+                resolveSessionDefaultConfigPath,
+            );
             return run(selected.adapter, selected.profile, selected.alias, args);
         };
 
     return [
+        createToolDefinition(
+            "database_explorer_set_default_config_path",
+            "Set a session-level default config path so subsequent database_explorer_* calls can omit configPath",
+            {
+                type: "object",
+                properties: {
+                    configPath: {
+                        type: "string",
+                        description: "Absolute or project-relative path to the database config YAML file",
+                    },
+                },
+                required: ["configPath"],
+                additionalProperties: false,
+            },
+            readSetDefaultConfigArgs,
+            async (args) => {
+                const cwd = getCwd();
+                const resolved = await resolveConfigPath(args.configPath, cwd, undefined, undefined);
+                await loadConfig(resolved);
+                sessionDefaultConfigPathByCwd.set(cwd, resolved);
+                return {
+                    cwd,
+                    defaultConfigPath: resolved,
+                };
+            },
+        ),
         createToolDefinition(
             "database_explorer_list_databases",
             "List configured database aliases from the database-explorer config",
@@ -150,6 +183,21 @@ export function createDatabaseExplorerDefinitions(options: DatabaseExplorerToolF
             tableToolParameters("Table name to describe"),
             readTableToolArgs,
             withAdapter(async (adapter, profile, alias, args) => adapter.describeTable(profile, args)),
+        ),
+        createToolDefinition(
+            "database_explorer_show_create_table",
+            "Return a CREATE TABLE statement plus foreign keys for one table",
+            tableToolParameters("Table name to inspect"),
+            readTableToolArgs,
+            withAdapter(async (adapter, profile, alias, args) => {
+                const description = await adapter.describeTable(profile, args);
+                const foreignKeys = await adapter.listForeignKeys(profile, args);
+                return {
+                    table: description.table,
+                    createStatement: description.createStatement,
+                    foreignKeys,
+                };
+            }),
         ),
         createToolDefinition(
             "database_explorer_sample_rows",
@@ -335,8 +383,9 @@ async function loadSelectedDriverProfile(
     args: CommonToolArgs,
     getCwd: () => string,
     defaultConfigPath?: string,
+    getSessionDefaultConfigPath?: (cwd: string) => string | undefined,
 ): Promise<{ alias: string; profile: Profile; adapter: DatabaseDriverAdapter }> {
-    const config = await loadConfigFromArgs(args, getCwd, defaultConfigPath);
+    const config = await loadConfigFromArgs(args, getCwd, defaultConfigPath, getSessionDefaultConfigPath);
     const selection = resolveProfileSelection(config, args.db);
     return {
         ...selection,
@@ -348,15 +397,26 @@ async function loadConfigFromArgs(
     args: CommonToolArgs,
     getCwd: () => string,
     defaultConfigPath?: string,
+    getSessionDefaultConfigPath?: (cwd: string) => string | undefined,
 ): Promise<Config> {
     const cwd = getCwd();
-    const configPath = await resolveConfigPath(args.configPath, cwd, defaultConfigPath);
+    const configPath = await resolveConfigPath(args.configPath, cwd, getSessionDefaultConfigPath?.(cwd), defaultConfigPath);
     return loadConfig(configPath);
 }
 
-async function resolveConfigPath(inputPath: string | undefined, cwd: string, defaultConfigPath?: string): Promise<string> {
+async function resolveConfigPath(
+    inputPath: string | undefined,
+    cwd: string,
+    sessionDefaultConfigPath?: string,
+    defaultConfigPath?: string,
+): Promise<string> {
     if (typeof inputPath === "string" && inputPath.trim() !== "") {
         const trimmedPath = inputPath.trim();
+        return isAbsolute(trimmedPath) ? trimmedPath : resolve(cwd, trimmedPath);
+    }
+
+    if (typeof sessionDefaultConfigPath === "string" && sessionDefaultConfigPath.trim() !== "") {
+        const trimmedPath = sessionDefaultConfigPath.trim();
         return isAbsolute(trimmedPath) ? trimmedPath : resolve(cwd, trimmedPath);
     }
 
@@ -401,7 +461,9 @@ async function loadConfig(configPath: string): Promise<Config> {
     const expanded = expandPlaceholders(raw);
     const parsed = parseYamlRoot(YAML.parse(expanded), parse(configPath).dir);
     if (Object.keys(parsed.databases).length === 0) {
-        throw new Error(`config ${configPath} must define at least one database under databases`);
+        throw new Error(
+            `config ${configPath} must define at least one database under databases (object form: databases: { alias: { ... } })`,
+        );
     }
     return parsed;
 }
@@ -412,8 +474,19 @@ function parseYamlRoot(value: unknown, configDirectory: string): Config {
     }
 
     const databasesValue = value.databases;
+    if (Array.isArray(databasesValue)) {
+        throw new Error(
+            "config.databases must be an object keyed by alias, not a YAML list. Example:\n" +
+                "databases:\n" +
+                "  main:\n" +
+                "    driver: mysql\n" +
+                "    host: 127.0.0.1\n" +
+                "    username: ${MYSQL_USER}\n" +
+                "    password: ${MYSQL_PASSWORD}",
+        );
+    }
     if (!isRecord(databasesValue)) {
-        throw new Error("config must define at least one database under databases");
+        throw new Error("config must define databases as an object keyed by alias");
     }
 
     const databases: Record<string, Profile> = {};
@@ -636,6 +709,13 @@ function readSearchArgs(value: unknown): SearchArgs {
         ...readCommonToolArgs(object),
         search: readRequiredString(object, "search"),
         limit: readOptionalInteger(object, "limit") || undefined,
+    };
+}
+
+function readSetDefaultConfigArgs(value: unknown): { configPath: string } {
+    const object = readToolArgs(value);
+    return {
+        configPath: readRequiredString(object, "configPath"),
     };
 }
 

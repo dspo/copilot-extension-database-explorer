@@ -1,7 +1,6 @@
 import mysql from "mysql2/promise";
 
 import {
-    buildContainsPattern,
     extractFieldNames,
     extractSingleColumnStrings,
     firstNonEmpty,
@@ -44,7 +43,7 @@ export const mysqlDriver: DatabaseDriverAdapter<MySqlProfile> = {
         return withMySqlConnection(profile, args.database, async (connection) => {
             const rows = await queryRowsOnly(
                 connection,
-                "SELECT DATABASE() AS database_name, VERSION() AS version, CURRENT_USER() AS current_user, 1 AS ok",
+                "SELECT DATABASE() AS database_name, VERSION() AS version, CURRENT_USER() AS current_user_name, 1 AS ok",
             );
             const details = rows[0] ?? {};
             return {
@@ -60,7 +59,7 @@ export const mysqlDriver: DatabaseDriverAdapter<MySqlProfile> = {
             const startedAt = Date.now();
             const rows = await queryRowsOnly(
                 connection,
-                "SELECT DATABASE() AS database_name, VERSION() AS version, @@hostname AS server_host, @@port AS server_port, @@transaction_read_only AS read_only, CURRENT_USER() AS current_user, 1 AS ok",
+                "SELECT DATABASE() AS database_name, VERSION() AS version, @@hostname AS server_host, @@port AS server_port, @@transaction_read_only AS read_only, CURRENT_USER() AS current_user_name, 1 AS ok",
             );
             const latencyMs = Date.now() - startedAt;
             const details = rows[0] ?? {};
@@ -127,7 +126,7 @@ export const mysqlDriver: DatabaseDriverAdapter<MySqlProfile> = {
     async findTable(profile, args) {
         const databaseName = resolveMySqlDatabase(profile, args);
         const limit = normalizeLimit(args.limit, 20);
-        const pattern = buildContainsPattern(args.search);
+        const pattern = buildMySqlContainsPattern(args.search);
         return withMySqlConnection(profile, args.database, async (connection) =>
             queryMySqlTabular(
                 connection,
@@ -138,7 +137,7 @@ export const mysqlDriver: DatabaseDriverAdapter<MySqlProfile> = {
                         TABLE_TYPE AS table_type
                     FROM information_schema.tables
                     WHERE TABLE_SCHEMA = ?
-                        AND TABLE_NAME LIKE ? ESCAPE '\\'
+                        AND TABLE_NAME LIKE ?
                     ORDER BY TABLE_NAME
                     LIMIT ${limit}
                 `,
@@ -149,7 +148,7 @@ export const mysqlDriver: DatabaseDriverAdapter<MySqlProfile> = {
     async findColumn(profile, args) {
         const databaseName = resolveMySqlDatabase(profile, args);
         const limit = normalizeLimit(args.limit, 20);
-        const pattern = buildContainsPattern(args.search);
+        const pattern = buildMySqlContainsPattern(args.search);
         return withMySqlConnection(profile, args.database, async (connection) =>
             queryMySqlTabular(
                 connection,
@@ -163,7 +162,7 @@ export const mysqlDriver: DatabaseDriverAdapter<MySqlProfile> = {
                         COLUMN_DEFAULT AS column_default
                     FROM information_schema.columns
                     WHERE TABLE_SCHEMA = ?
-                        AND COLUMN_NAME LIKE ? ESCAPE '\\'
+                        AND COLUMN_NAME LIKE ?
                     ORDER BY TABLE_NAME, ORDINAL_POSITION
                     LIMIT ${limit}
                 `,
@@ -301,6 +300,14 @@ function extractCreateStatement(rows: NormalizedRow[], table: string): string {
 
 function resolveMySqlDatabase(profile: MySqlProfile, args: CommonToolArgs): string {
     return firstNonEmpty(args.database, profile.database);
+}
+
+function buildMySqlContainsPattern(search: string): string {
+    const trimmed = String(search ?? "").trim();
+    if (trimmed === "") {
+        throw new Error("search is required");
+    }
+    return `%${trimmed}%`;
 }
 
 function normalizeMySqlPort(port: number): number {

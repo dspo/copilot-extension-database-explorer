@@ -40,6 +40,18 @@ try {
         if (!tool) {
             throw new Error(`missing tool ${name}`);
         }
+        const result = await tool.handler({ ...args, db: "local" });
+        if (result.resultType !== "success") {
+            throw new Error(`${name} failed: ${result.textResultForLlm}`);
+        }
+        return JSON.parse(result.textResultForLlm);
+    }
+
+    async function runToolWithConfig(name, args = {}) {
+        const tool = tools.find((entry) => entry.name === name);
+        if (!tool) {
+            throw new Error(`missing tool ${name}`);
+        }
         const result = await tool.handler({ ...args, configPath, db: "local" });
         if (result.resultType !== "success") {
             throw new Error(`${name} failed: ${result.textResultForLlm}`);
@@ -47,14 +59,16 @@ try {
         return JSON.parse(result.textResultForLlm);
     }
 
-    if (tools.length !== 16) {
-        throw new Error(`expected 16 tools, received ${tools.length}`);
+    if (tools.length !== 18) {
+        throw new Error(`expected 18 tools, received ${tools.length}`);
     }
 
+    await runToolWithConfig("database_explorer_set_default_config_path", { configPath });
     const health = await runTool("database_explorer_health_check");
     const findTable = await runTool("database_explorer_find_table", { search: "us" });
     const findColumn = await runTool("database_explorer_find_column", { search: "email" });
     const listColumns = await runTool("database_explorer_list_columns", { table: "users" });
+    const showCreateTable = await runTool("database_explorer_show_create_table", { table: "users" });
     const explain = await runTool("database_explorer_explain_query", {
         sql: 'SELECT * FROM users WHERE email = "ada@example.com"',
     });
@@ -73,6 +87,12 @@ try {
     }
     if (listColumns.rows.length !== 3) {
         throw new Error("list_columns did not return the expected columns");
+    }
+    if (typeof showCreateTable.createStatement !== "string" || showCreateTable.createStatement.trim() === "") {
+        throw new Error("show_create_table did not return a create statement");
+    }
+    if (!showCreateTable.foreignKeys || !Array.isArray(showCreateTable.foreignKeys.rows) || showCreateTable.foreignKeys.rows.length === 0) {
+        throw new Error("show_create_table did not return foreign keys");
     }
     if (explain.rows.length === 0) {
         throw new Error("explain_query returned no plan rows");

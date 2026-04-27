@@ -20,6 +20,7 @@ The extension and MCP server expose the same shared tool surface:
 - `database_explorer_find_column`
 - `database_explorer_list_columns`
 - `database_explorer_describe_table`
+- `database_explorer_show_create_table`
 - `database_explorer_sample_rows`
 - `database_explorer_query`
 - `database_explorer_explain_query`
@@ -27,6 +28,7 @@ The extension and MCP server expose the same shared tool surface:
 - `database_explorer_list_indexes`
 - `database_explorer_list_foreign_keys`
 - `database_explorer_export_schema`
+- `database_explorer_set_default_config_path`
 
 ## Install into a project
 
@@ -156,7 +158,8 @@ By default, both the installed Copilot extension and the MCP server look for dat
 If a project uses another location, you can:
 
 1. pass `--config` when starting the MCP server
-2. pass `configPath` explicitly to the tools
+2. call `database_explorer_set_default_config_path` once per session
+3. pass `configPath` explicitly to the tools
 
 Supported `driver` values:
 
@@ -190,8 +193,11 @@ databases:
     path: ./data/app.sqlite
 ```
 
+`databases` must be a map keyed by alias (object form above), not a YAML list.
+
 After the config is in place, use `database_explorer_test_connection` first to confirm the selected alias can connect and execute a simple query.
 Use `database_explorer_health_check` when you also want latency and readiness details.
+Use `database_explorer_show_create_table` when you need DDL plus foreign keys in one call.
 
 ## Architecture
 

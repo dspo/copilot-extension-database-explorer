@@ -4,6 +4,7 @@ export const DEFAULT_LIMIT = 10;
 export const DEFAULT_SEARCH_LIMIT = 20;
 const IDENTIFIER_PATTERN = /^[A-Za-z0-9_]+$/;
 const SELECT_PATTERN = /^\s*select\b/is;
+const SHOW_CREATE_TABLE_PATTERN = /^\s*show\s+create\s+table\b/is;
 const LIMIT_PATTERN = /\blimit\b/is;
 
 export function validateSelectStatement(sqlText: string): string {
@@ -13,6 +14,11 @@ export function validateSelectStatement(sqlText: string): string {
     }
     if (trimmed.includes(";")) {
         throw new Error("multiple statements are not allowed");
+    }
+    if (SHOW_CREATE_TABLE_PATTERN.test(trimmed)) {
+        throw new Error(
+            "safety restriction: only SELECT queries are allowed; use database_explorer_show_create_table (or database_explorer_describe_table) instead",
+        );
     }
     if (!SELECT_PATTERN.test(trimmed)) {
         throw new Error("safety restriction: only SELECT queries are allowed");
