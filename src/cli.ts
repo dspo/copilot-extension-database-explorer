@@ -1,4 +1,5 @@
 import { access, copyFile, mkdir, readdir, rm, stat } from "node:fs/promises";
+import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -11,6 +12,7 @@ const distDir = join(packageRoot, "dist");
 interface InstallOptions {
     target: string;
     force: boolean;
+    userScope: boolean;
 }
 
 interface McpOptions {
@@ -42,11 +44,15 @@ async function main(): Promise<void> {
 function parseInstallOptions(argv: string[]): InstallOptions {
     let target = process.cwd();
     let force = false;
+    let userScope = false;
 
     for (let index = 0; index < argv.length; index += 1) {
         const argument = argv[index];
         switch (argument) {
             case "--target": {
+                if (userScope) {
+                    throw new Error("--target cannot be combined with --user/--global");
+                }
                 const next = argv[index + 1];
                 if (!next) {
                     throw new Error("--target requires a path");
@@ -55,6 +61,14 @@ function parseInstallOptions(argv: string[]): InstallOptions {
                 index += 1;
                 break;
             }
+            case "--user":
+            case "--global":
+                if (target !== process.cwd()) {
+                    throw new Error("--user/--global cannot be combined with --target");
+                }
+                userScope = true;
+                target = resolveUserExtensionsDir();
+                break;
             case "--force":
                 force = true;
                 break;
@@ -63,7 +77,7 @@ function parseInstallOptions(argv: string[]): InstallOptions {
         }
     }
 
-    return { target, force };
+    return { target, force, userScope };
 }
 
 function parseMcpOptions(argv: string[]): McpOptions {
@@ -101,9 +115,14 @@ function parseMcpOptions(argv: string[]): McpOptions {
 
 async function install(options: InstallOptions): Promise<void> {
     await ensureDistArtifacts(MANAGED_FILES);
+    if (options.userScope) {
+        await mkdir(options.target, { recursive: true });
+    }
     await ensureDirectory(options.target);
 
-    const extensionDir = join(options.target, ".github", "extensions", "database-explorer");
+    const extensionDir = options.userScope
+        ? join(options.target, "database-explorer")
+        : join(options.target, ".github", "extensions", "database-explorer");
     const existingEntries = await readDirectoryEntries(extensionDir);
     const unexpectedEntries = existingEntries.filter((entry) => !MANAGED_FILES.includes(entry as (typeof MANAGED_FILES)[number]));
 
@@ -124,7 +143,7 @@ async function install(options: InstallOptions): Promise<void> {
 
     console.log(`Installed database-explorer extension into ${extensionDir}`);
     console.log("Next steps:");
-    console.log("1. Add database config at .github/database-explorer/database-config.yaml in the target project.");
+    console.log("1. Add database config at .github/database-explorer/database-config.yaml in each target project.");
     console.log("2. Restart Copilot CLI or run /clear so the new extension is loaded.");
     console.log("3. Run database_explorer_test_connection to verify the configured alias can connect.");
 }
@@ -182,9 +201,13 @@ function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
     return typeof error === "object" && error !== null && "code" in error;
 }
 
+function resolveUserExtensionsDir(): string {
+    return join(homedir(), ".copilot", "extensions");
+}
+
 function printHelp(): void {
     console.log("Usage:");
-    console.log("  npx copilot-extension-database-explorer install [--target /path/to/project] [--force]");
+    console.log("  npx copilot-extension-database-explorer install [--target /path/to/project | --user|--global] [--force]");
     console.log("  npx copilot-extension-database-explorer mcp [--cwd /path/to/project] [--config /path/to/database-config.yaml]");
 }
 

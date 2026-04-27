@@ -42,6 +42,14 @@ Or install into another directory:
 npx copilot-extension-database-explorer install --target /path/to/project
 ```
 
+Install into Copilot CLI user-level extensions (`~/.copilot/extensions/database-explorer`):
+
+```bash
+npx copilot-extension-database-explorer install --user
+```
+
+`--global` is accepted as an alias for `--user`.
+
 ## Run directly from GitHub
 
 The repository is set up so `npx` can execute it straight from GitHub without committing `dist/`:
@@ -49,6 +57,7 @@ The repository is set up so `npx` can execute it straight from GitHub without co
 ```bash
 npx github:dspo/copilot-extension-database-explorer --help
 npx github:dspo/copilot-extension-database-explorer install
+npx github:dspo/copilot-extension-database-explorer install --user
 ```
 
 This relies on the package `prepare` script to build `dist/` during Git-based installs.
