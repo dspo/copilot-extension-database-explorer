@@ -151,7 +151,7 @@ Both the installed Copilot extension and the MCP server use `config` JSON text (
 The `config` field accepts either:
 
 1. one profile object
-2. an array of profile objects (each with `name`)
+2. an array of profile objects (each with `name`; legacy `alias` is also accepted)
 
 Supported `driver` values:
 

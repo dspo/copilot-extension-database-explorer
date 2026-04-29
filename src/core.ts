@@ -62,7 +62,7 @@ export function buildDatabaseExplorerAdditionalContext(skillText: string): strin
     return [
         "database-explorer extension loaded.",
         "When the request involves MySQL, PostgreSQL, SQLite, schema inspection, tables, columns, indexes, foreign keys, sample data, connection checks, health checks, explain plans, or read-only SQL, prefer the database_explorer_* tools available in this session.",
-        "Each database_explorer_* tool accepts config as JSON text. Pass either one profile object or a profile array with name fields.",
+        "Each database_explorer_* tool accepts config as JSON text. Pass either one profile object or a profile array. Use name as the profile key; alias is also accepted for compatibility.",
         "JSON config may use ${ENV_VAR} placeholders; environment values are expanded before parsing.",
         "Start by listing configured database aliases, then run database_explorer_health_check first (mode=quick for fast connectivity checks; mode=full for latency/current-db details).",
         "For table DDL/shape, use database_explorer_describe_table instead of hand-writing SHOW CREATE TABLE in database_explorer_query.",
@@ -413,10 +413,12 @@ function normalizeInputProfile(value: unknown, cwd: string, requireName: boolean
         throw new Error("each config profile must be a JSON object");
     }
     const name = readOptionalString(value, "name");
-    if (requireName && name === "") {
-        throw new Error("each profile in config array must include a non-empty name");
+    const legacyAlias = readOptionalString(value, "alias");
+    const profileKey = firstNonEmpty(name, legacyAlias);
+    if (requireName && profileKey === "") {
+        throw new Error("each profile in config array must include a non-empty name (alias is also accepted)");
     }
-    const alias = firstNonEmpty(name, "default");
+    const alias = firstNonEmpty(profileKey, "default");
     return {
         alias,
         profile: normalizeProfile(alias, value, cwd),

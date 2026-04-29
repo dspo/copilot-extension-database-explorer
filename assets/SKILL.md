@@ -7,13 +7,13 @@ When a task involves MySQL, PostgreSQL, or SQLite exploration, schema discovery,
 ## Execution rules
 
 1. Prefer the `database_explorer_*` tools registered by this extension.
-2. Provide `config` as JSON text in tool arguments (single profile object or profile array).
+2. Provide `config` as JSON text in tool arguments (single profile object or profile array). Use `name` as the profile key; `alias` is also accepted for compatibility.
 3. The MCP server may be started with a default `--config '<json text>'`; tool-level `config` overrides that default.
 4. Do not build or call external Go binaries for database exploration.
 
 ## JSON config format (required)
 
-Single profile object:
+Single profile object (`name` preferred, `alias` accepted):
 
 ```json
 {
@@ -28,7 +28,7 @@ Single profile object:
 }
 ```
 
-Profile array:
+Profile array (`name` preferred, `alias` accepted):
 
 ```json
 [
